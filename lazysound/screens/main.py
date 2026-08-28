@@ -10,7 +10,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.reactive import reactive
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Button, Footer, Header, Input, Label, Select, Static
 
 from lazysound.core.scanner import AudioFile, scan_directory
 from lazysound.core.metadata import AudioMetadata, read_metadata
@@ -163,9 +163,6 @@ class GotoScreen(Screen):
     @on(Button.Pressed, "#btn-cancel")
     def on_cancel(self) -> None:
         self.dismiss(None)
-
-
-from textual.widgets import Button, Input
 
 
 class BatchEditScreen(Screen):
