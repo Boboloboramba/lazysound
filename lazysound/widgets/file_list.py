@@ -40,8 +40,7 @@ class FileList(Widget):
 
     def __init__(self, start_path: Path | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
-        if start_path:
-            self.current_path = start_path
+        self._start_path = start_path
 
     def compose(self) -> ComposeResult:
         yield Static("Audio Files")
@@ -51,9 +50,14 @@ class FileList(Widget):
         table = self.query_one("#file-table", DataTable)
         table.add_columns("Name", "Format", "Size")
         table.cursor_type = "row"
+        if self._start_path:
+            self.current_path = self._start_path
+            self._start_path = None
         self._load_files()
 
     def watch_current_path(self, path: Path) -> None:
+        if not self.is_mounted:
+            return
         self._load_files()
 
     def _load_files(self) -> None:

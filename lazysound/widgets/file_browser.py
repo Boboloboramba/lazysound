@@ -37,14 +37,16 @@ class FileBrowser(Widget):
 
     def __init__(self, start_path: Path | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
-        if start_path:
-            self.current_path = start_path
+        self._start_path = start_path
 
     def compose(self) -> ComposeResult:
         yield Static("Directories")
         yield Tree("Home", id="dir-tree")
 
     def on_mount(self) -> None:
+        if self._start_path:
+            self.current_path = self._start_path
+            self._start_path = None
         tree = self.query_one("#dir-tree", Tree)
         self._populate_tree(tree, self.current_path)
 
@@ -88,7 +90,10 @@ class FileBrowser(Widget):
 
     def watch_current_path(self, path: Path) -> None:
         """Update the tree when path changes."""
-        tree = self.query_one("#dir-tree", Tree)
+        try:
+            tree = self.query_one("#dir-tree", Tree)
+        except Exception:
+            return
         tree.root.label = str(path.name) or str(path)
         tree.root.data = path
         tree.root.remove_children()

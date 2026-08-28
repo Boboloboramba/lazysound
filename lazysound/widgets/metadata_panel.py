@@ -117,6 +117,8 @@ class MetadataPanel(Widget):
         self._refresh_display()
 
     def watch_current_file(self, file: AudioFile | None) -> None:
+        if not self.is_mounted:
+            return
         if file:
             self._load_metadata(file)
         else:
