@@ -45,11 +45,13 @@ class FileBrowser(Widget):
         yield Tree("Home", id="dir-tree")
 
     def on_mount(self) -> None:
+        tree = self.query_one("#dir-tree", Tree)
         if self._start_path:
+            # watch_current_path will populate when we set current_path
             self.current_path = self._start_path
             self._start_path = None
-        tree = self.query_one("#dir-tree", Tree)
-        self._populate_tree(tree, self.current_path)
+        else:
+            self._populate_tree(tree, self.current_path)
 
     def _populate_tree(self, tree: Tree, path: Path, parent=None) -> None:
         """Populate tree nodes for a directory."""
@@ -66,6 +68,12 @@ class FileBrowser(Widget):
                     child.add_leaf("Loading...")
         except PermissionError:
             node.add_leaf("Permission denied")
+        # ensure root is expanded so children visible
+        try:
+            if parent is None:
+                tree.root.expand()
+        except Exception:
+            pass
 
     @on(Tree.NodeExpanded)
     def on_node_expanded(self, event: Tree.NodeExpanded) -> None:

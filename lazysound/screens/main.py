@@ -53,6 +53,17 @@ class MainScreen(Screen):
         Binding("b", "batch_edit", "Batch Edit"),
         Binding("r", "refresh", "Refresh"),
         Binding("g", "goto", "Go To"),
+        # vim-style hjkl (priority so they work when DataTable/Tree has focus)
+        Binding("j", "cursor_down", "Down", show=False, priority=True),
+        Binding("k", "cursor_up", "Up", show=False, priority=True),
+        Binding("h", "focus_left", "Left", show=False, priority=True),
+        Binding("l", "focus_right", "Right", show=False, priority=True),
+        Binding("G", "cursor_bottom", "Bottom", show=False, priority=True),
+        Binding("home", "cursor_top", "Top", show=False, priority=True),
+        Binding("end", "cursor_bottom", "Bottom", show=False, priority=True),
+        Binding("ctrl+d", "page_down", "Page Down", show=False, priority=True),
+        Binding("ctrl+u", "page_up", "Page Up", show=False, priority=True),
+        Binding("enter", "select_focused", "Select", show=False),
     ]
 
     current_path: reactive[Path] = reactive(Path.home())
@@ -81,6 +92,14 @@ class MainScreen(Screen):
 
     def on_mount(self) -> None:
         self._rebuild_index()
+        # vim-friendly: focus file list so hjkl works immediately
+        self.set_timer(0.6, lambda: self._focus_file_list())
+
+    def _focus_file_list(self) -> None:
+        try:
+            self.query_one("#file-table", DataTable).focus()
+        except Exception:
+            pass
 
     # -- directory / index --
 
@@ -305,6 +324,242 @@ class MainScreen(Screen):
 
     def action_seek_forward(self) -> None:
         self.query_one("#playback-panel", PlaybackPanel).action_seek_forward()
+
+    # -- vim-style hjkl --
+
+    def _is_input_focused(self) -> bool:
+        try:
+            f = self.app.focused
+            return isinstance(f, (Input, Select))
+        except Exception:
+            return False
+
+    def _focused_table_or_tree(self):
+        try:
+            f = self.app.focused
+            # walk up to find DataTable / Tree
+            if f is None:
+                return None
+            # direct hit
+            from textual.widgets import DataTable, Tree
+
+            if isinstance(f, (DataTable, Tree)):
+                return f
+            # check if focused is inside FileList/FileBrowser and return inner table/tree
+            # fallback: find the widget that contains focus
+            return None
+        except Exception:
+            return None
+
+    def action_cursor_down(self) -> None:
+        if self._is_input_focused():
+            return
+        # try to move focused DataTable/Tree, else default to file list
+        try:
+            from textual.widgets import DataTable, Tree
+
+            f = self.app.focused
+            if isinstance(f, DataTable):
+                f.action_cursor_down()
+                return
+            if isinstance(f, Tree):
+                f.action_cursor_down()
+                return
+            # no table focused → focus file list and move
+            tbl = self.query_one("#file-table", DataTable)
+            tbl.focus()
+            tbl.action_cursor_down()
+        except Exception:
+            pass
+
+    def action_cursor_up(self) -> None:
+        if self._is_input_focused():
+            return
+        try:
+            from textual.widgets import DataTable, Tree
+
+            f = self.app.focused
+            if isinstance(f, DataTable):
+                f.action_cursor_up()
+                return
+            if isinstance(f, Tree):
+                f.action_cursor_up()
+                return
+            tbl = self.query_one("#file-table", DataTable)
+            tbl.focus()
+            tbl.action_cursor_up()
+        except Exception:
+            pass
+
+    def action_focus_left(self) -> None:
+        if self._is_input_focused():
+            return
+        try:
+            from textual.widgets import DataTable, Tree
+
+            order = []
+            try:
+                order.append(self.query_one("#dir-tree", Tree))
+            except Exception:
+                pass
+            try:
+                order.append(self.query_one("#file-table", DataTable))
+            except Exception:
+                pass
+            if not order:
+                return
+            idx = -1
+            for i, w in enumerate(order):
+                if w.has_focus:
+                    idx = i
+                    break
+            if idx == -1:
+                order[0].focus()
+            elif idx > 0:
+                order[idx - 1].focus()
+            else:
+                order[-1].focus()
+        except Exception:
+            pass
+
+    def action_focus_right(self) -> None:
+        if self._is_input_focused():
+            return
+        try:
+            from textual.widgets import DataTable, Tree
+
+            order = []
+            try:
+                order.append(self.query_one("#dir-tree", Tree))
+            except Exception:
+                pass
+            try:
+                order.append(self.query_one("#file-table", DataTable))
+            except Exception:
+                pass
+            if not order:
+                return
+            idx = -1
+            for i, w in enumerate(order):
+                if w.has_focus:
+                    idx = i
+                    break
+            if idx == -1:
+                order[-1].focus()
+            elif idx < len(order) - 1:
+                order[idx + 1].focus()
+            else:
+                order[0].focus()
+        except Exception:
+            pass
+
+    def action_cursor_top(self) -> None:
+        if self._is_input_focused():
+            return
+        try:
+            from textual.widgets import DataTable, Tree
+
+            f = self.app.focused
+            if isinstance(f, DataTable):
+                f.move_cursor(row=0)
+                return
+            if isinstance(f, Tree):
+                f.select_node(f.root)
+                return
+            tbl = self.query_one("#file-table", DataTable)
+            tbl.move_cursor(row=0)
+            tbl.focus()
+        except Exception:
+            pass
+
+    def action_cursor_bottom(self) -> None:
+        if self._is_input_focused():
+            return
+        try:
+            from textual.widgets import DataTable, Tree
+
+            f = self.app.focused
+            if isinstance(f, DataTable):
+                # move to last row
+                last = max(0, f.row_count - 1)
+                f.move_cursor(row=last)
+                return
+            if isinstance(f, Tree):
+                # no direct bottom, select last visible leaf
+                try:
+                    # try to select last child of root
+                    if f.root.children:
+                        f.select_node(f.root.children[-1])
+                except Exception:
+                    pass
+                return
+            tbl = self.query_one("#file-table", DataTable)
+            last = max(0, tbl.row_count - 1)
+            tbl.move_cursor(row=last)
+            tbl.focus()
+        except Exception:
+            pass
+
+    def action_page_down(self) -> None:
+        if self._is_input_focused():
+            return
+        try:
+            from textual.widgets import DataTable, Tree
+
+            f = self.app.focused
+            # page = 10 rows
+            if isinstance(f, DataTable):
+                cur = f.cursor_row or 0
+                nxt = min(f.row_count - 1, cur + 10)
+                f.move_cursor(row=nxt)
+                return
+            if isinstance(f, Tree):
+                f.action_page_down()
+                return
+            tbl = self.query_one("#file-table", DataTable)
+            cur = tbl.cursor_row or 0
+            nxt = min(tbl.row_count - 1, cur + 10)
+            tbl.move_cursor(row=nxt)
+            tbl.focus()
+        except Exception:
+            pass
+
+    def action_page_up(self) -> None:
+        if self._is_input_focused():
+            return
+        try:
+            from textual.widgets import DataTable, Tree
+
+            f = self.app.focused
+            if isinstance(f, DataTable):
+                cur = f.cursor_row or 0
+                nxt = max(0, cur - 10)
+                f.move_cursor(row=nxt)
+                return
+            if isinstance(f, Tree):
+                f.action_page_up()
+                return
+            tbl = self.query_one("#file-table", DataTable)
+            cur = tbl.cursor_row or 0
+            nxt = max(0, cur - 10)
+            tbl.move_cursor(row=nxt)
+            tbl.focus()
+        except Exception:
+            pass
+
+    def action_select_focused(self) -> None:
+        if self._is_input_focused():
+            return
+        # Enter selects highlighted row (already handled by RowHighlighted, but ensure playback)
+        try:
+            from textual.widgets import DataTable
+
+            f = self.app.focused
+            if isinstance(f, DataTable):
+                # trigger select = post FileSelected already via highlight, but ensure play?
+                pass
+        except Exception:
+            pass
 
 
 class FuzzyPalette(ModalScreen):

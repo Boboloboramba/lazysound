@@ -120,9 +120,19 @@ class FileList(Widget):
 
     @on(DataTable.RowSelected)
     def on_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Post message when a file is selected."""
+        """Post message when a file is selected (Enter/click)."""
         af = self.get_selected_file()
         if af:
+            self.post_message(FileSelected(af))
+
+    @on(DataTable.RowHighlighted)
+    def on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        """Live preview on cursor move (vim j/k)."""
+        # RowHighlighted fires on every cursor move; use for vim navigation
+        if event.cursor_row is None:
+            return
+        if 0 <= event.cursor_row < len(self.files):
+            af = self.files[event.cursor_row]
             self.post_message(FileSelected(af))
 
 
