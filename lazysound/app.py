@@ -38,13 +38,13 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         prog="lazysound",
-        description="A terminal UI for managing audio file metadata",
+        description="A terminal UI for managing audio file metadata — scans system for sound/music/DAW projects",
     )
     parser.add_argument(
         "directory",
         nargs="?",
         default=None,
-        help="Directory to open (default: home directory or configured default)",
+        help="Directory to open (default: scans system library — ~ plus /usr/share/sounds etc; press L to browse all audio folders, / to fuzzy search)",
     )
     parser.add_argument(
         "--version",

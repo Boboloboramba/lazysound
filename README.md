@@ -42,26 +42,36 @@ Pluggable architecture for reading DAW project files:
 ## Installation
 
 ```bash
-# From source
+# From source — wrapper makes `lazysound` available globally
 git clone https://github.com/Boboloboramba/lazysound.git
 cd lazysound
-pip install -e .
+python -m venv .venv
+.venv/bin/pip install -e .
+
+# Put `lazysound` on your PATH (so you don't need .venv/bin/lazysound)
+ln -sf $(pwd)/.venv/bin/lazysound ~/.local/bin/lazysound  # ~/.local/bin is on PATH on Omarchy
+# alternative via pipx (if you have it):
+# pipx install -e .
 
 # With DAW support
-pip install -e ".[daw]"
+.venv/bin/pip install -e ".[daw]"
 
 # Development
-pip install -e ".[dev]"
+.venv/bin/pip install -e ".[dev]"
 ```
 
 ## Usage
 
 ```bash
-# Open in current directory
+# Just type `lazysound` — scans your system for all audio folders
+# (home + /usr/share/sounds etc, cached in ~/.cache/lazysound/library.json)
+# Shows 86+ files from your real library; press L to browse all folders
 lazysound
 
 # Open specific directory
 lazysound ~/Music/audio
+lazysound ./test_audio
+lazysound ./real_samples   # 18 real music + voice samples
 
 # Open with config file
 lazysound --config ~/.config/lazysound/config.json
@@ -72,8 +82,20 @@ lazysound --config ~/.config/lazysound/config.json
 | Key | Action |
 |-----|--------|
 | `q` | Quit |
+| `/` | Focus fuzzy search (deep metadata, WRatio) |
+| `Ctrl+K` | Fuzzy palette (system-wide) |
+| `Esc` | Clear search / close palette |
+| `i` | Info — editable tree view for selected file (j/k navigate, e edit, a add, d delete, Ctrl+S save, Esc close) |
+| `L` | Library — system-wide folders with audio/DAW files (r rescan, Enter open) |
+| `Space` | Play / Pause (selected file, with waveform + progress) |
+| `s` | Stop |
+| `←` / `→` | Seek -5s / +5s (click waveform to jump) |
+| `h` / `l` | Focus left / right pane |
+| `j` / `k` | Cursor down / up (live preview) |
+| `G` / `Home` / `End` | Bottom / Top |
+| `Ctrl+d` / `Ctrl+u` | Page down / up |
 | `b` | Batch edit selected files |
-| `r` | Refresh file list |
+| `r` | Refresh |
 | `g` | Go to directory |
 | `Enter` | Select file / expand directory |
 
