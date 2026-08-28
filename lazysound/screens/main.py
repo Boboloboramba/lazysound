@@ -498,9 +498,28 @@ class MainScreen(Screen):
     def action_focus_left(self) -> None:
         if self._is_input_focused():
             return
+        # Vim h in directories panel = go to parent (like `cd ..`)
         try:
             from textual.widgets import DataTable, Tree
 
+            f = self.app.focused
+            if isinstance(f, Tree) and f.id == "dir-tree":
+                fb = self.query_one(FileBrowser)
+                parent = fb.current_path.parent
+                if parent != fb.current_path and str(parent) != str(fb.current_path):
+                    try:
+                        if parent.exists() or str(parent) == "/":
+                            fb.current_path = parent
+                            self.current_path = parent
+                            try:
+                                self.query_one(FileList).current_path = parent
+                            except Exception:
+                                pass
+                            self._rebuild_index()
+                            return
+                    except Exception:
+                        pass
+                # at top or can't go parent -> fall through to pane switch
             order = []
             try:
                 order.append(self.query_one("#dir-tree", Tree))
@@ -532,6 +551,22 @@ class MainScreen(Screen):
         try:
             from textual.widgets import DataTable, Tree
 
+            f = self.app.focused
+            if isinstance(f, Tree) and f.id == "dir-tree":
+                tree = f
+                node = tree.cursor_node
+                data = getattr(node, "data", None) if node else None
+                fb = self.query_one(FileBrowser)
+                if isinstance(data, Path) and data.is_dir() and data != fb.current_path:
+                    fb.current_path = data
+                    self.current_path = data
+                    try:
+                        self.query_one(FileList).current_path = data
+                    except Exception:
+                        pass
+                    self._rebuild_index()
+                    return
+                # otherwise (at root or no child) fall through to pane switch
             order = []
             try:
                 order.append(self.query_one("#dir-tree", Tree))

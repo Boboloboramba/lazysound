@@ -41,7 +41,7 @@ class FileBrowser(Widget):
         self._start_path = start_path
 
     def compose(self) -> ComposeResult:
-        yield Static("Directories")
+        yield Static("Directories — j/k move • l enter • h back  (h/l also switch panes)")
         yield Tree("Home", id="dir-tree")
 
     def on_mount(self) -> None:
