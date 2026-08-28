@@ -11,6 +11,8 @@ from typing import Callable
 
 import numpy as np
 
+from lazysound.core.errors import log_error  # lazy import to avoid cycle, but top-level ok
+
 
 class PlaybackState(Enum):
     STOPPED = auto()
@@ -28,12 +30,41 @@ class PlaybackInfo:
     channels: int = 0
 
 
+def _is_html_file(path: Path) -> bool:
+    """Quick check if file with audio extension is actually HTML (e.g. 404 page)."""
+    try:
+        # only check small files (< 100KB) that could be HTML error pages
+        sz = path.stat().st_size
+        if sz == 0:
+            return False
+        if sz > 200_000:
+            return False
+        head = path.read_bytes()[:2048].lstrip()
+        low = head[:500].lower()
+        if low.startswith(b"<!doctype") or low.startswith(b"<html") or low.startswith(b"<!doctype html"):
+            return True
+        # also check for <title>404
+        if b"<title>404" in low or b"not found" in low and b"<html" in low:
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def _load_audio(path: Path) -> tuple[np.ndarray, int]:
     """Load audio file to numpy array (samples, channels) + sr.
 
     Tries soundfile first (wav/flac/aiff/ogg), then audioread (mp3/m4a/opus via ffmpeg),
     then ffmpeg direct decode as last resort.
     """
+    # early HTML check for friendly error
+    if _is_html_file(path):
+        try:
+            sz = path.stat().st_size
+        except Exception:
+            sz = 0
+        msg = f"File is HTML (likely 404 page, {sz} bytes) not audio — not decodable. Path: {path}. Remove or re-download."
+        raise RuntimeError(msg)
     # try soundfile (libsndfile) – fast for wav/flac/aiff/ogg
     try:
         import soundfile as sf
@@ -96,8 +127,10 @@ def _load_audio(path: Path) -> tuple[np.ndarray, int]:
             except Exception:
                 pass
     except Exception as e:
-        raise RuntimeError(f"Cannot decode {path}: {e}") from e
-    raise RuntimeError(f"Cannot decode {path}: all backends failed")
+        msg = f"Cannot decode {path.name}: {e} (all backends failed — file may be corrupted, truncated, or unsupported codec)"
+        raise RuntimeError(msg) from e
+    msg = f"Cannot decode {path.name}: all backends failed"
+    raise RuntimeError(msg)
 
 
 class AudioPlayer:

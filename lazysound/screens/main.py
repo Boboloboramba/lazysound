@@ -58,6 +58,8 @@ class MainScreen(Screen):
         Binding("I", "info", "Info", show=False),
         Binding("L", "library", "Library"),
         Binding("ctrl+l", "library", "Library", show=False),
+        Binding("E", "error_log", "Errors"),
+        Binding("ctrl+e", "error_log", "Errors", show=False),
         # vim-style hjkl (priority so they work when DataTable/Tree has focus)
         Binding("j", "cursor_down", "Down", show=False, priority=True),
         Binding("k", "cursor_up", "Up", show=False, priority=True),
@@ -355,17 +357,40 @@ class MainScreen(Screen):
             pass
         self._rebuild_index()
 
+    def action_error_log(self) -> None:
+        if self._is_input_focused():
+            return
+        from lazysound.screens.errors import ErrorLogScreen
+
+        self.app.push_screen(ErrorLogScreen(), self._on_error_log_pick)
+
+    def _on_error_log_pick(self, picked: Path | None) -> None:
+        if not picked or not picked.is_dir():
+            return
+        self.current_path = picked
+        try:
+            from lazysound.widgets.file_browser import FileBrowser
+
+            self.query_one(FileBrowser).current_path = picked
+        except Exception:
+            pass
+        try:
+            self.query_one("#file-list", FileList).current_path = picked
+        except Exception:
+            pass
+        self._rebuild_index()
+
     def _maybe_system_scan(self) -> None:
         # run in background if stale or empty
         if self.library.is_stale(max_age_hours=24):
-            self.app.notify("Scanning system for audio folders… (L to view library)", severity="information")
+            self.app.notify("Scanning system for audio folders… (L to view library)", severity="information", timeout=8)
             self._system_scan_bg()
         else:
             # still notify count
             try:
                 cnt = len(self.library.get_folders())
                 if cnt:
-                    self.app.notify(f"Library: {cnt} folders with audio/DAW files (L to view)", severity="information")
+                    self.app.notify(f"Library: {cnt} folders with audio/DAW files (L to view, E for errors)", severity="information", timeout=8)
             except Exception:
                 pass
 

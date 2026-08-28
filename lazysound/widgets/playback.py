@@ -11,6 +11,7 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Button, Label, ProgressBar, Static
 
+from lazysound.core.errors import log_error
 from lazysound.core.player import AudioPlayer, PlaybackInfo, PlaybackState
 from lazysound.core.scanner import AudioFile
 from lazysound.widgets.waveform import render_waveform_with_playhead
@@ -129,7 +130,25 @@ class PlaybackPanel(Widget):
         try:
             duration = self.player.load(af.path)
         except Exception as e:
-            self.app.call_from_thread(lambda: self.app.notify(f"Cannot load {af.path.name}: {e}", severity="error"))
+            # log persistently and show in UI
+            log_error(af.path, str(e), context="playback")
+            msg = f"Cannot load {af.path.name}: {e}"
+
+            def _err():
+                # show error persistently in panel
+                self._duration = 0
+                self._auto_loaded_path = None
+                self._set_file_label(f"⚠ {af.path.name}")
+                try:
+                    self.query_one("#time-label", Label).update("ERROR")
+                    self.query_one("#progress", ProgressBar).update(total=100, progress=0)
+                    # show error in waveform area
+                    self.query_one("#waveform", Static).update(f"⚠ Cannot decode\n{str(e)[:80]}\nPress E for log")
+                except Exception:
+                    pass
+                self.app.notify(msg + "  (press E for error log)", severity="error", timeout=12)
+
+            self.app.call_from_thread(_err)
             return
 
         def _done():
@@ -161,13 +180,20 @@ class PlaybackPanel(Widget):
                 self._duration = self.player.load(self.current_file.path)
                 self._auto_loaded_path = self.current_file.path
             except Exception as e:
-                self.app.notify(f"Load failed: {e}", severity="error")
+                log_error(self.current_file.path, str(e), context="playback")
+                # show error in panel
+                try:
+                    self.query_one("#waveform", Static).update(f"⚠ Cannot decode\n{str(e)[:80]}\nPress E for log")
+                    self.query_one("#time-label", Label).update("ERROR")
+                except Exception:
+                    pass
+                self.app.notify(f"Load failed: {e}  (E for log)", severity="error", timeout=10)
                 return
         ok = self.player.play()
         if ok:
             self.query_one("#btn-play", Button).label = "▶ Playing"
         else:
-            self.app.notify("Cannot start playback", severity="error")
+            self.app.notify("Cannot start playback — file may be corrupted or unsupported (E for log)", severity="error", timeout=10)
 
     @on(Button.Pressed, "#btn-pause")
     def on_pause(self) -> None:

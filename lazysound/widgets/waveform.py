@@ -11,8 +11,22 @@ import numpy as np
 BLOCKS = " \u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
 
 
+def _is_html_file(path: Path) -> bool:
+    try:
+        sz = path.stat().st_size
+        if sz == 0 or sz > 200_000:
+            return False
+        head = path.read_bytes()[:2048].lstrip()
+        low = head[:600].lower()
+        return low.startswith(b"<!doctype") or low.startswith(b"<html") or (b"<title>404" in low and b"<html" in low)
+    except Exception:
+        return False
+
+
 def _load_audio_mono(path: Path, target_sr: int = 22050) -> np.ndarray | None:
     """Load audio as mono float array at target_sr, handling all formats."""
+    if _is_html_file(path):
+        return None
     # try soundfile + librosa fast path with resampling
     try:
         import soundfile as sf
@@ -120,12 +134,36 @@ def _render_from_rms(rms_values: list[float], width: int, height: int) -> list[s
     return lines
 
 
+def _error_waveform(width: int, height: int, msg: str = "⚠ Cannot decode — corrupted or not audio") -> str:
+    # Center message in a box
+    lines = []
+    msg_line = msg[: width - 2].center(width)
+    # top border
+    lines.append("┌" + "─" * (width - 2) + "┐")
+    mid = height // 2
+    for r in range(height - 2):
+        if r == mid - 1:
+            lines.append("│" + msg_line + "│")
+        elif r == mid:
+            # second line with path hint if available
+            lines.append("│" + " (press E for error log)".center(width) + "│")
+        else:
+            lines.append("│" + " " * (width) + "│"[: width + 2])
+            # actually width+2 includes borders, so inner width = width-2
+            lines[-1] = "│" + " " * (width - 2) + "│"
+    lines.append("└" + "─" * (width - 2) + "┘")
+    # ensure correct height (if height small, truncate)
+    return "\n".join(lines[:height])
+
+
 def render_waveform(
     audio_path: Path,
     width: int = 80,
     height: int = 8,
 ) -> str:
     """Render an ASCII waveform from an audio file."""
+    if _is_html_file(audio_path):
+        return _error_waveform(width, height, "⚠ HTML 404 page — not audio (check file)")
     try:
         vals = list(_cached_rms(str(audio_path), width))
         # detect fallback case: all zeros but file exists -> try fallback only if load failed
@@ -134,6 +172,14 @@ def render_waveform(
             # try to distinguish empty vs failed load - attempt direct load
             direct = _load_rms(audio_path, width)
             if direct is None:
+                # check if file is actually decodable at all (maybe corrupted)
+                # try to give error waveform instead of pseudo fallback if file is small/corrupted
+                try:
+                    sz = audio_path.stat().st_size
+                    if sz < 1024:
+                        return _error_waveform(width, height, "⚠ Too small / corrupted")
+                except Exception:
+                    pass
                 return _fallback_waveform(audio_path, width, height)
         lines = _render_from_rms(vals, width, height)
         return "\n".join(lines)
@@ -154,6 +200,8 @@ def render_waveform_with_playhead(
     Uses Rich markup to highlight played portion dim vs bright.
     The playhead column is rendered with a distinct character.
     """
+    if _is_html_file(audio_path):
+        return _error_waveform(width, height, "⚠ HTML 404 — not audio")
     progress = max(0.0, min(1.0, progress))
     play_col = int(progress * (width - 1)) if width > 1 else 0
 
