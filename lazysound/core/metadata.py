@@ -391,37 +391,54 @@ def write_metadata(meta: AudioMetadata) -> str | None:
                 del audio.tags[key]
 
         elif isinstance(audio, MP3):
-            audio.delall("T*")
-            audio.delall("TDRC")
-            audio.delall("TYER")
-            audio.delall("TDRL")
+            # MP3 uses ID3 via audio.tags
+            if audio.tags is None:
+                audio.add_tags()
+            # clear existing text frames via tags
+            try:
+                audio.tags.delall("T*")
+                for k in ("TDRC", "TYER", "TDRL"):
+                    audio.tags.delall(k)
+            except Exception:
+                for k in list(audio.tags.keys()):
+                    if isinstance(k, str) and k.startswith("T"):
+                        try:
+                            del audio.tags[k]
+                        except Exception:
+                            pass
+            # need frame classes for proper add
+            from mutagen.id3 import TIT2, TPE1, TALB, TPE2, TRCK, TPOS, TDRC, TCON, TCOM, TPE3, TCOP, TENC, TSRC
+
+            frame_map_mp3 = {
+                "title": TIT2,
+                "artist": TPE1,
+                "album": TALB,
+                "albumartist": TPE2,
+                "tracknumber": TRCK,
+                "discnumber": TPOS,
+                "date": TDRC,
+                "genre": TCON,
+                "composer": TCOM,
+                "performer": TPE3,
+                "copyright": TCOP,
+                "encodedby": TENC,
+                "isrc": TSRC,
+            }
             for tag_key, value in meta.tags.items():
-                if tag_key == "title":
-                    audio.add("TIT2", encoding=3, text=value)
-                elif tag_key == "artist":
-                    audio.add("TPE1", encoding=3, text=value)
-                elif tag_key == "album":
-                    audio.add("TALB", encoding=3, text=value)
-                elif tag_key == "albumartist":
-                    audio.add("TPE2", encoding=3, text=value)
-                elif tag_key == "tracknumber":
-                    audio.add("TRCK", encoding=3, text=value)
-                elif tag_key == "discnumber":
-                    audio.add("TPOS", encoding=3, text=value)
-                elif tag_key == "date":
-                    audio.add("TDRC", encoding=3, text=value)
-                elif tag_key == "genre":
-                    audio.add("TCON", encoding=3, text=value)
-                elif tag_key == "composer":
-                    audio.add("TCOM", encoding=3, text=value)
-                elif tag_key == "performer":
-                    audio.add("TPE3", encoding=3, text=value)
-                elif tag_key == "copyright":
-                    audio.add("TCOP", encoding=3, text=value)
-                elif tag_key == "encodedby":
-                    audio.add("TENC", encoding=3, text=value)
-                elif tag_key == "isrc":
-                    audio.add("TSRC", encoding=3, text=value)
+                cls = frame_map_mp3.get(tag_key)
+                if cls:
+                    try:
+                        audio.tags.add(cls(encoding=3, text=value))
+                    except Exception:
+                        pass
+                else:
+                    # custom -> TXXX
+                    try:
+                        from mutagen.id3 import TXXX
+
+                        audio.tags.add(TXXX(encoding=3, desc=tag_key, text=value))
+                    except Exception:
+                        pass
 
         elif isinstance(audio, MP4):
             if audio.tags is None:
