@@ -136,11 +136,15 @@ def _extract_vorbis_tags(audio: mutagen.FileType) -> dict[str, str]:
     tags: dict[str, str] = {}
     if audio.tags is None:
         return tags
-    for key in audio.tags:
-        key_lower = key.lower()
-        values = audio.tags[key]
-        if values:
-            tags[key_lower] = values[0] if isinstance(values, list) else str(values)
+    # VCFLACDict iterates tuples; use keys()
+    for key in list(audio.tags.keys()):
+        try:
+            key_lower = str(key).lower()
+            values = audio.tags[key]
+            if values:
+                tags[key_lower] = values[0] if isinstance(values, list) else str(values)
+        except Exception:
+            continue
     return tags
 
 
@@ -221,32 +225,60 @@ def _extract_apev2_tags(audio: APEv2) -> dict[str, str]:
     tags: dict[str, str] = {}
     if not audio.tags:
         return tags
-    for key in audio.tags:
-        tags[key.lower()] = str(audio.tags[key])
+    for key in list(audio.tags.keys()):
+        try:
+            tags[str(key).lower()] = str(audio.tags[key])
+        except Exception:
+            continue
     return tags
 
 
 def _extract_id3_or_apev2(audio: mutagen.FileType) -> dict[str, str]:
-    """Extract ID3 or APEv2 tags from WAV/AIFF."""
+    """Extract ID3 or APEv2 tags from WAV/AIFF and map to standard keys."""
     tags: dict[str, str] = {}
     if audio.tags is None:
         return tags
-    # Try as ID3 first
+    id3_frame_map = {
+        "tit2": "title",
+        "tpe1": "artist",
+        "talb": "album",
+        "tpe2": "albumartist",
+        "trck": "tracknumber",
+        "tpos": "discnumber",
+        "tdrc": "date",
+        "tdrl": "date",
+        "tyer": "date",
+        "tcon": "genre",
+        "tcom": "composer",
+        "tpe3": "performer",
+        "tcop": "copyright",
+        "tenc": "encodedby",
+        "tsrc": "isrc",
+    }
     try:
         if hasattr(audio.tags, "getall"):
-            for key in audio.tags:
-                key_lower = key.lower().strip()
-                vals = audio.tags.getall(key)
-                if vals:
-                    v = vals[0]
-                    text = v.text[0] if hasattr(v, "text") and v.text else str(v)
-                    tags[key_lower] = str(text)
-            return tags
+            for key in list(audio.tags.keys()):
+                try:
+                    key_low = str(key).lower().strip()
+                    std_key = id3_frame_map.get(key_low, key_low)
+                    vals = audio.tags.getall(key)
+                    if vals:
+                        v = vals[0]
+                        text = v.text[0] if hasattr(v, "text") and v.text else str(v)
+                        tags[std_key] = str(text)
+                except Exception:
+                    continue
+            if tags:
+                return tags
     except Exception:
         pass
-    # Fallback to generic
-    for key in audio.tags:
-        tags[key.lower()] = str(audio.tags[key])
+    for key in list(audio.tags.keys()):
+        try:
+            k = str(key).lower()
+            std = id3_frame_map.get(k, k)
+            tags[std] = str(audio.tags[key])
+        except Exception:
+            continue
     return tags
 
 
@@ -307,8 +339,11 @@ def read_metadata(audio_file: AudioFile) -> AudioMetadata:
         else:
             # Generic fallback
             if audio.tags:
-                for key in audio.tags:
-                    meta.tags[key.lower()] = str(audio.tags[key])
+                for key in list(audio.tags.keys()):
+                    try:
+                        meta.tags[str(key).lower()] = str(audio.tags[key])
+                    except Exception:
+                        continue
     except Exception as e:
         meta.error = f"Error reading tags: {e}"
 

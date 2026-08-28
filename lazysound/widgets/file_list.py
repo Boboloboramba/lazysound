@@ -79,6 +79,28 @@ class FileList(Widget):
                 af.size_display,
             )
 
+    def set_files(self, files: list[AudioFile]) -> None:
+        """Display an arbitrary list of files (used for deep search / recursive view)."""
+        try:
+            table = self.query_one("#file-table", DataTable)
+        except Exception:
+            self.files = files
+            return
+        table.clear()
+        self.files = files
+        for af in files:
+            # show relative path hint when deep
+            rel = ""
+            try:
+                if af.path.parent != self.current_path:
+                    rel = f" ({af.path.parent.name})"
+            except Exception:
+                pass
+            display = af.path.stem + rel
+            if len(display) > 32:
+                display = display[:31] + "…"
+            table.add_row(display, af.format_name, af.size_display)
+
     def get_selected_file(self) -> AudioFile | None:
         """Get the currently selected AudioFile."""
         table = self.query_one("#file-table", DataTable)

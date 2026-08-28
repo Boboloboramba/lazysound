@@ -184,7 +184,7 @@ class PlaybackPanel(Widget):
             self.query_one("#btn-play", Button).label = "▶ Play"
         except Exception:
             pass
-        self._update_progress(0.0)
+        self._refresh_from_player()
 
     @on(Button.Pressed, "#btn-back")
     def on_back(self) -> None:

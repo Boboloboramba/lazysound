@@ -1,4 +1,4 @@
-"""Main application screen with 3-pane layout."""
+"""Main screen — 3 panes + prominent fuzzy search + palette + bottom playback."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.screen import Screen
+from textual.screen import ModalScreen, Screen
 from textual.reactive import reactive
-from textual.widgets import Button, Footer, Header, Input, Label, Select, Static
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Select, Static
 
+from lazysound.core.metadata import read_metadata
 from lazysound.core.scanner import AudioFile, scan_directory
-from lazysound.core.metadata import AudioMetadata, read_metadata
 from lazysound.core.search import SearchEngine, SearchQuery
-from lazysound.widgets.file_browser import FileBrowser, DirectoryChanged
+from lazysound.widgets.file_browser import DirectoryChanged, FileBrowser
 from lazysound.widgets.file_list import FileList, FileSelected
 from lazysound.widgets.metadata_panel import MetadataPanel
 from lazysound.widgets.playback import PlaybackPanel
@@ -23,15 +23,13 @@ from lazysound.widgets.search import SearchBar, SearchChanged
 
 
 class MainScreen(Screen):
-    """Main screen: 3 panes + bottom playback panel."""
-
     CSS = """
     MainScreen #main-row {
         height: 1fr;
     }
     #left-pane {
-        width: 30;
-        min-width: 20;
+        width: 28;
+        min-width: 18;
     }
     #center-pane {
         width: 1fr;
@@ -39,19 +37,22 @@ class MainScreen(Screen):
     }
     #right-pane {
         width: 1fr;
-        min-width: 40;
+        min-width: 38;
     }
     """
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        Binding("slash", "focus_search", "Search"),
+        Binding("ctrl+k", "palette", "Palette"),
+        Binding("escape", "clear_search", "Clear"),
         Binding("space", "play_pause", "Play/Pause"),
-        Binding("s", "stop", "Stop"),
+        Binding("s", "stop", "Stop", key_display="s"),
         Binding("left", "seek_back", " -5s"),
         Binding("right", "seek_forward", " +5s"),
         Binding("b", "batch_edit", "Batch Edit"),
         Binding("r", "refresh", "Refresh"),
-        Binding("g", "goto", "Go To Directory"),
+        Binding("g", "goto", "Go To"),
     ]
 
     current_path: reactive[Path] = reactive(Path.home())
@@ -62,54 +63,220 @@ class MainScreen(Screen):
         super().__init__(**kwargs)
         if start_path:
             self.current_path = start_path
+        self.all_files: list[AudioFile] = []
+        self._indexed: int = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield SearchBar(id="search-bar")
         with Horizontal(id="main-row"):
             with Vertical(id="left-pane"):
                 yield FileBrowser(start_path=self.current_path, id="file-browser")
             with Vertical(id="center-pane"):
-                yield SearchBar(id="search-bar")
                 yield FileList(start_path=self.current_path, id="file-list")
             with Vertical(id="right-pane"):
                 yield MetadataPanel(id="metadata-panel")
         yield PlaybackPanel(id="playback-panel")
         yield Footer()
 
+    def on_mount(self) -> None:
+        self._rebuild_index()
+
+    # -- directory / index --
+
     @on(DirectoryChanged)
     def on_directory_changed(self, event: DirectoryChanged) -> None:
         self.current_path = event.path
         self.query_one("#file-list", FileList).current_path = event.path
+        self._rebuild_index()
+
+    @work(thread=True)
+    def _rebuild_index(self) -> None:
+        root = self.current_path
+        try:
+            res = scan_directory(root, recursive=True, max_depth=6)
+            files = res.audio_files
+        except Exception:
+            files = []
+        self.all_files = files
+        # cache current file-list's files as fallback? file_list will show nested? keep file_list showing current dir only when not searching
+        # deep index metadata
+        indexed = 0
+        for af in files:
+            try:
+                meta = read_metadata(af)
+                self.search_engine.cache_metadata(af.path, meta)
+                indexed += 1
+                if indexed % 20 == 0 or indexed == len(files):
+                    c = indexed
+                    t = len(files)
+
+                    def _upd(c=c, t=t):
+                        try:
+                            sb = self.query_one("#search-bar", SearchBar)
+                            sb.update_index_hint(c, t)
+                        except Exception:
+                            pass
+
+                    self.app.call_from_thread(_upd)
+            except Exception:
+                indexed += 1
+        self._indexed = indexed
+        # final build haystack and hint
+        try:
+            self.search_engine.build_index(files)
+        except Exception:
+            pass
+
+        def _done():
+            try:
+                sb = self.query_one("#search-bar", SearchBar)
+                sb.update_index_hint(indexed, len(files))
+                q = sb.get_query()
+                if q.text.strip():
+                    self._apply_search(q)
+                else:
+                    # show files under current_path (recursive) in file list
+                    try:
+                        fl = self.query_one("#file-list", FileList)
+                        # filter all_files to those under current_path
+                        cur = self.current_path
+                        shown = [f for f in files if cur in f.path.parents or f.path.parent == cur]
+                        if shown:
+                            fl.set_files(shown)
+                            sb.set_result_count(len(shown), len(files))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        self.app.call_from_thread(_done)
+
+    # -- selection --
 
     @on(FileSelected)
     def on_file_selected(self, event: FileSelected) -> None:
         self.selected_file = event.audio_file
-        self.query_one("#metadata-panel", MetadataPanel).current_file = event.audio_file
-        self.query_one("#playback-panel", PlaybackPanel).current_file = event.audio_file
+        try:
+            self.query_one("#metadata-panel", MetadataPanel).current_file = event.audio_file
+            self.query_one("#playback-panel", PlaybackPanel).current_file = event.audio_file
+        except Exception:
+            pass
+
+    # -- search --
 
     @on(SearchChanged)
     def on_search_changed(self, event: SearchChanged) -> None:
-        """Filter the file list based on search query."""
+        self._apply_search(event.query)
+
+    def _apply_search(self, query: SearchQuery) -> None:
         file_list = self.query_one("#file-list", FileList)
-        if not event.query.text.strip():
-            file_list._load_files()
+        bar = self.query_one("#search-bar", SearchBar)
+        total = len(self.all_files) if self.all_files else len(file_list.files)
+
+        if not query.text.strip():
+            # restore recursive view under current_path
+            if self.all_files:
+                cur = self.current_path
+                shown_files = [f for f in self.all_files if cur in f.path.parents or f.path.parent == cur]
+                if shown_files:
+                    file_list.set_files(shown_files)
+                else:
+                    file_list._load_files()
+            else:
+                file_list._load_files()
+            shown = len(file_list.files)
+            bar.set_result_count(shown, total, self._indexed if self.all_files else None)
             return
 
-        # Filter files based on query
-        filtered = self.search_engine.search(file_list.files, event.query)
-        # Update the table
-        table = file_list.query_one("#file-table")
+        # deep fuzzy search over all_files (falls back to file_list.files if all_files empty)
+        pool = self.all_files if self.all_files else file_list.files
+        results = self.search_engine.search(pool, query)
+        shown = len(results)
+        bar.set_result_count(shown, total)
+
+        # render in file_list (show deep results with relative path)
+        try:
+            table = file_list.query_one("#file-table", DataTable)
+        except Exception:
+            return
         table.clear()
-        file_list.files = [r.audio_file for r in filtered]
-        for r in filtered:
-            table.add_row(
-                r.audio_file.path.stem,
-                r.audio_file.format_name,
-                r.audio_file.size_display,
-            )
+        # keep file_list.files in sync so selection works
+        file_list.files = [r.audio_file for r in results]
+        for r in results:
+            # show stem + matched field hint + dir
+            hint = r.matched_field
+            if hint and hint != "filename":
+                display = f"{r.audio_file.path.stem}  [{hint}:{r.matched_value[:24]}]"
+            else:
+                display = r.audio_file.path.stem
+            # truncate display
+            if len(display) > 38:
+                display = display[:36] + "…"
+            # score badge for fuzzy
+            score_str = f"{int(r.score)}" if r.score else ""
+            table.add_row(display, r.audio_file.format_name, r.audio_file.size_display)
+
+    # -- actions --
+
+    def action_focus_search(self) -> None:
+        self.query_one("#search-bar", SearchBar).focus_input()
+
+    def action_palette(self) -> None:
+        pool = self.all_files if self.all_files else self.query_one("#file-list", FileList).files
+        cache = dict(self.search_engine._metadata_cache)
+        self.app.push_screen(FuzzyPalette(pool, cache, self.search_engine), self._on_palette_pick)
+
+    def _on_palette_pick(self, picked: AudioFile | None) -> None:
+        if not picked:
+            return
+        # switch to its directory and select it
+        try:
+            # update file list to show deep results: temporarily set all_files filter? Simpler: navigate to directory
+            target_dir = picked.path.parent
+            self.current_path = target_dir
+            # update file Browser + file list
+            try:
+                from lazysound.widgets.file_browser import FileBrowser
+
+                self.query_one(FileBrowser).current_path = target_dir
+            except Exception:
+                pass
+            fl = self.query_one("#file-list", FileList)
+            fl.current_path = target_dir
+            # defer selection until file_list loaded
+            def _select():
+                # ensure file is in list
+                for idx, af in enumerate(fl.files):
+                    if af.path == picked.path:
+                        try:
+                            tbl = fl.query_one("#file-table", DataTable)
+                            tbl.move_cursor(row=idx)
+                            # trigger selection
+                            fl.post_message(FileSelected(af))
+                        except Exception:
+                            pass
+                        break
+
+            self.set_timer(0.15, _select)
+        except Exception:
+            pass
+
+    def action_clear_search(self) -> None:
+        bar = self.query_one("#search-bar", SearchBar)
+        if bar.query_text:
+            bar.clear()
+            # will trigger SearchChanged -> _apply_search restores list
+        else:
+            # if already empty and focus is in search, blur
+            try:
+                self.query_one("#file-list", FileList).focus()
+            except Exception:
+                pass
 
     def action_refresh(self) -> None:
         self.query_one("#file-list", FileList)._load_files()
+        self._rebuild_index()
 
     def action_goto(self) -> None:
         self.app.push_screen(GotoScreen(self.current_path))
@@ -120,6 +287,14 @@ class MainScreen(Screen):
             self.app.push_screen(BatchEditScreen(file_list.files))
 
     def action_play_pause(self) -> None:
+        # don't steal space when typing in search/input
+        try:
+            focused = self.app.focused
+            if focused and isinstance(focused, Input):
+                # let Input handle space
+                return
+        except Exception:
+            pass
         self.query_one("#playback-panel", PlaybackPanel).action_play_pause()
 
     def action_stop(self) -> None:
@@ -132,9 +307,99 @@ class MainScreen(Screen):
         self.query_one("#playback-panel", PlaybackPanel).action_seek_forward()
 
 
-class GotoScreen(Screen):
-    """Screen for navigating to a directory by path."""
+class FuzzyPalette(ModalScreen):
+    """Full-screen fuzzy palette (like Ctrl+P) with deep metadata ranking."""
 
+    DEFAULT_CSS = """
+    FuzzyPalette {
+        align: center middle;
+        background: rgba(0,0,0,0.6);
+    }
+    FuzzyPalette #palette-box {
+        width: 80;
+        height: 28;
+        max-height: 80%;
+        background: $surface;
+        border: thick $primary;
+        padding: 1 1;
+    }
+    FuzzyPalette Input {
+        dock: top;
+        margin-bottom: 1;
+    }
+    FuzzyPalette DataTable {
+        height: 1fr;
+    }
+    FuzzyPalette #palette-hint {
+        height: 1;
+        color: $text-muted;
+        text-style: italic;
+    }
+    """
+
+    def __init__(self, files: list[AudioFile], cache: dict, engine: SearchEngine, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.files = files
+        self.cache = cache
+        self.engine = engine
+        self._results: list = []
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="palette-box"):
+            yield Static("🔍 Fuzzy Palette — deep search (Enter to open, Esc to close)", id="palette-hint")
+            yield Input(placeholder="Type to fuzzy-filter by filename / title / artist / album / genre / path …", id="palette-input")
+            yield DataTable(id="palette-table")
+
+    def on_mount(self) -> None:
+        table = self.query_one("#palette-table", DataTable)
+        table.cursor_type = "row"
+        table.add_columns("Score", "File", "Match", "Format", "Path")
+        self.query_one("#palette-input", Input).focus()
+        self._update_table("")
+
+    @on(Input.Changed, "#palette-input")
+    def on_input_changed(self, event: Input.Changed) -> None:
+        self._update_table(event.value)
+
+    def _update_table(self, text: str) -> None:
+        from lazysound.core.search import SearchQuery, FilterMode, SearchMode
+
+        table = self.query_one("#palette-table", DataTable)
+        table.clear()
+        q = SearchQuery(text=text, mode=SearchMode.ANY, filter_mode=FilterMode.FUZZY)
+        if text.strip():
+            results = self.engine.fuzzy_search(self.files, text, self.cache, threshold=45, limit=100)
+        else:
+            # show top 50 files as browse
+            from lazysound.core.search import SearchResult
+
+            results = [SearchResult(audio_file=f, score=100) for f in self.files[:50]]
+        self._results = results
+        for r in results:
+            score = f"{int(r.score)}" if r.score else ""
+            name = r.audio_file.path.stem
+            match = f"{r.matched_field}:{r.matched_value[:30]}" if r.matched_field else ""
+            fmt = r.audio_file.format_name
+            # relative-ish path
+            try:
+                rel = r.audio_file.path.relative_to(Path.cwd())
+            except Exception:
+                rel = r.audio_file.path
+            table.add_row(score, name, match, fmt, str(rel))
+
+    @on(DataTable.RowSelected, "#palette-table")
+    def on_row_selected(self, event: DataTable.RowSelected) -> None:
+        idx = event.cursor_row
+        if idx is not None and 0 <= idx < len(self._results):
+            self.dismiss(self._results[idx].audio_file)
+
+    def on_key(self, event) -> None:
+        # Textual key handler
+        if event.key == "escape":
+            self.dismiss(None)
+
+
+class GotoScreen(Screen):
     CSS = """
     GotoScreen {
         align: center middle;
@@ -172,12 +437,12 @@ class GotoScreen(Screen):
 
     @on(Button.Pressed, "#btn-go")
     def on_go(self) -> None:
-        input = self.query_one("#path-input", Input)
-        path = Path(input.value)
+        inp = self.query_one("#path-input", Input)
+        path = Path(inp.value)
         if path.is_dir():
             self.dismiss(path)
         else:
-            self.app.notify(f"Not a directory: {input.value}", severity="error")
+            self.app.notify(f"Not a directory: {inp.value}", severity="error")
 
     @on(Button.Pressed, "#btn-cancel")
     def on_cancel(self) -> None:
@@ -185,8 +450,6 @@ class GotoScreen(Screen):
 
 
 class BatchEditScreen(Screen):
-    """Screen for batch editing metadata across multiple files."""
-
     CSS = """
     BatchEditScreen {
         align: center middle;
@@ -235,7 +498,6 @@ class BatchEditScreen(Screen):
                     yield Static(f"  {af.path.name} ({af.format_name})")
                 if len(self.files) > 20:
                     yield Static(f"  ... and {len(self.files) - 20} more")
-
             yield Label("Field to edit:")
             yield Select(
                 [
@@ -252,10 +514,8 @@ class BatchEditScreen(Screen):
                 id="batch-field",
                 allow_blank=False,
             )
-
             yield Label("Value:")
             yield Input(placeholder="New value", id="batch-value")
-
             with Horizontal():
                 yield Button("Apply", id="btn-apply", variant="success")
                 yield Button("Cancel", id="btn-cancel")
@@ -266,11 +526,9 @@ class BatchEditScreen(Screen):
 
         field = str(self.query_one("#batch-field", Select).value)
         value = self.query_one("#batch-value", Input).value
-
         if not value:
             self.app.notify("Please enter a value", severity="warning")
             return
-
         result = batch_set_field(self.files, field, value)
         self.app.notify(f"Batch edit: {result.summary}", severity="success" if result.error_count == 0 else "warning")
         self.dismiss(True)

@@ -128,7 +128,7 @@ class MetadataPanel(Widget):
     @work(thread=True)
     def _load_metadata(self, file: AudioFile) -> None:
         meta = read_metadata(file)
-        self.call_from_refresh(self._set_metadata, meta)
+        self.app.call_from_thread(lambda: self._set_metadata(meta))
 
     def _set_metadata(self, meta: AudioMetadata) -> None:
         self.metadata = meta
@@ -163,22 +163,24 @@ class MetadataPanel(Widget):
         tags_container.mount(Static("Metadata Tags", classes="section-header"))
         for field_key, field_label in STANDARD_FIELDS:
             value = meta.tags.get(field_key, "")
-            with tags_container.mount(Horizontal(classes="meta-row")):
-                tags_container.mount(Label(field_label, classes="meta-label"))
-                if self.editing:
-                    inp = Input(value=value, placeholder=field_label, classes="meta-input", id=f"edit-{field_key}")
-                    tags_container.mount(inp)
-                else:
-                    display = value if value else "-"
-                    tags_container.mount(Static(display, classes="meta-value"))
+            row = Horizontal(classes="meta-row")
+            tags_container.mount(row)
+            row.mount(Label(field_label, classes="meta-label"))
+            if self.editing:
+                inp = Input(value=value, placeholder=field_label, classes="meta-input", id=f"edit-{field_key}")
+                row.mount(inp)
+            else:
+                display = value if value else "-"
+                row.mount(Static(display, classes="meta-value"))
 
         # Technical info (read-only)
         tech_container.mount(Static("Technical Info", classes="section-header"))
         for field_key, field_label in TECH_FIELDS:
             value = meta.technical.get(field_key, "")
-            with tech_container.mount(Horizontal(classes="meta-row")):
-                tech_container.mount(Label(field_label, classes="meta-label"))
-                tech_container.mount(Static(value if value else "-", classes="meta-value"))
+            row2 = Horizontal(classes="meta-row")
+            tech_container.mount(row2)
+            row2.mount(Label(field_label, classes="meta-label"))
+            row2.mount(Static(value if value else "-", classes="meta-value"))
 
         if meta.error:
             tags_container.mount(Static(f"Warning: {meta.error}", classes="meta-row"))
