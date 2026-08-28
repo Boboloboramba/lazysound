@@ -12,6 +12,7 @@ from textual.screen import ModalScreen, Screen
 from textual.reactive import reactive
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Select, Static
 
+from lazysound.core.library import AudioLibrary
 from lazysound.core.metadata import read_metadata
 from lazysound.core.scanner import AudioFile, scan_directory
 from lazysound.core.search import SearchEngine, SearchQuery
@@ -53,6 +54,10 @@ class MainScreen(Screen):
         Binding("b", "batch_edit", "Batch Edit"),
         Binding("r", "refresh", "Refresh"),
         Binding("g", "goto", "Go To"),
+        Binding("i", "info", "Info"),
+        Binding("I", "info", "Info", show=False),
+        Binding("L", "library", "Library"),
+        Binding("ctrl+l", "library", "Library", show=False),
         # vim-style hjkl (priority so they work when DataTable/Tree has focus)
         Binding("j", "cursor_down", "Down", show=False, priority=True),
         Binding("k", "cursor_up", "Up", show=False, priority=True),
@@ -76,6 +81,7 @@ class MainScreen(Screen):
             self.current_path = start_path
         self.all_files: list[AudioFile] = []
         self._indexed: int = 0
+        self.library = AudioLibrary()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -94,6 +100,8 @@ class MainScreen(Screen):
         self._rebuild_index()
         # vim-friendly: focus file list so hjkl works immediately
         self.set_timer(0.6, lambda: self._focus_file_list())
+        # system-wide folder tracking (background)
+        self._maybe_system_scan()
 
     def _focus_file_list(self) -> None:
         try:
@@ -304,6 +312,77 @@ class MainScreen(Screen):
         file_list = self.query_one("#file-list", FileList)
         if file_list.files:
             self.app.push_screen(BatchEditScreen(file_list.files))
+
+    def action_info(self) -> None:
+        # don't trigger when typing
+        if self._is_input_focused():
+            return
+        target = self.selected_file
+        if not target:
+            # try to get from file list
+            try:
+                fl = self.query_one("#file-list", FileList)
+                target = fl.get_selected_file()
+            except Exception:
+                target = None
+        if not target:
+            self.app.notify("No file selected — use j/k to highlight a file then press i", severity="warning")
+            return
+        from lazysound.screens.info import MetadataInfoScreen
+
+        self.app.push_screen(MetadataInfoScreen(target))
+
+    def action_library(self) -> None:
+        if self._is_input_focused():
+            return
+        from lazysound.screens.library import LibraryScreen
+
+        self.app.push_screen(LibraryScreen(self.library), self._on_library_pick)
+
+    def _on_library_pick(self, picked: Path | None) -> None:
+        if not picked or not picked.is_dir():
+            return
+        self.current_path = picked
+        try:
+            from lazysound.widgets.file_browser import FileBrowser
+
+            self.query_one(FileBrowser).current_path = picked
+        except Exception:
+            pass
+        try:
+            self.query_one("#file-list", FileList).current_path = picked
+        except Exception:
+            pass
+        self._rebuild_index()
+
+    def _maybe_system_scan(self) -> None:
+        # run in background if stale or empty
+        if self.library.is_stale(max_age_hours=24):
+            self.app.notify("Scanning system for audio folders… (L to view library)", severity="information")
+            self._system_scan_bg()
+        else:
+            # still notify count
+            try:
+                cnt = len(self.library.get_folders())
+                if cnt:
+                    self.app.notify(f"Library: {cnt} folders with audio/DAW files (L to view)", severity="information")
+            except Exception:
+                pass
+
+    @work(thread=True)
+    def _system_scan_bg(self) -> None:
+        def _prog(scanned: int, found: int, cur: str) -> None:
+            if scanned % 600 == 0:
+                try:
+                    self.app.call_from_thread(lambda: self.app.notify(f"Library scan: {scanned} dirs, {found} folders — {cur}", severity="information", timeout=2))
+                except Exception:
+                    pass
+
+        try:
+            folders = self.library.scan_system(progress_cb=_prog)
+            self.app.call_from_thread(lambda: self.app.notify(f"Library scan done — {len(folders)} folders tracked (L to view)", severity="success"))
+        except Exception as e:
+            self.app.call_from_thread(lambda: self.app.notify(f"Library scan error: {e}", severity="error"))
 
     def action_play_pause(self) -> None:
         # don't steal space when typing in search/input

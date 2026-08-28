@@ -469,12 +469,102 @@ def write_metadata(meta: AudioMetadata) -> str | None:
                 del audio.tags[key]
 
         elif isinstance(audio, (WAVE, AIFF)):
-            # WAV/AIFF with ID3 or APEv2
-            if hasattr(audio, "add_tags"):
-                if audio.tags is None:
-                    audio.add_tags()
-                for key, value in meta.tags.items():
-                    audio.tags[key] = value
+            # WAV/AIFF store ID3 (like MP3) but via audio.tags
+            if audio.tags is None:
+                audio.add_tags()
+            # clear existing text frames
+            try:
+                for k in list(audio.tags.keys()):
+                    if isinstance(k, str) and k.startswith("T"):
+                        del audio.tags[k]
+            except Exception:
+                pass
+            # map standard keys to ID3 frames (same as MP3)
+            id3_map = {
+                "title": ("TIT2", 3),
+                "artist": ("TPE1", 3),
+                "album": ("TALB", 3),
+                "albumartist": ("TPE2", 3),
+                "tracknumber": ("TRCK", 3),
+                "discnumber": ("TPOS", 3),
+                "date": ("TDRC", 3),
+                "genre": ("TCON", 3),
+                "composer": ("TCOM", 3),
+                "performer": ("TPE3", 3),
+                "copyright": ("TCOP", 3),
+                "encodedby": ("TENC", 3),
+                "isrc": ("TSRC", 3),
+            }
+            # choose add target: MP3 uses audio.add, AIFF/WAVE use audio.tags.add
+            def _add_frame(frame_id: str, encoding: int, text: str) -> None:
+                # try audio.add first (MP3), then audio.tags.add (AIFF/WAVE)
+                for target in (audio, getattr(audio, "tags", None)):
+                    if target is not None and hasattr(target, "add"):
+                        try:
+                            target.add(frame_id, encoding=encoding, text=text)  # type: ignore
+                            return
+                        except TypeError:
+                            # some add signatures differ
+                            try:
+                                from mutagen.id3 import TIT2, TPE1, TALB  # noqa
+
+                                # fallback via explicit frame class
+                                pass
+                            except Exception:
+                                pass
+                        except Exception:
+                            continue
+                # fallback: direct dict assignment with Frame object
+                try:
+                    from mutagen.id3 import TIT2, TPE1, TALB, TPE2, TRCK, TPOS, TDRC, TCON, TCOM, TPE3, TCOP, TENC, TSRC, TXXX
+
+                    frame_cls = {
+                        "TIT2": TIT2,
+                        "TPE1": TPE1,
+                        "TALB": TALB,
+                        "TPE2": TPE2,
+                        "TRCK": TRCK,
+                        "TPOS": TPOS,
+                        "TDRC": TDRC,
+                        "TCON": TCON,
+                        "TCOM": TCOM,
+                        "TPE3": TPE3,
+                        "TCOP": TCOP,
+                        "TENC": TENC,
+                        "TSRC": TSRC,
+                    }.get(frame_id)
+                    if frame_cls:
+                        audio.tags[frame_id] = frame_cls(encoding=encoding, text=text)
+                    else:
+                        audio.tags[frame_id] = text  # type: ignore
+                except Exception:
+                    pass
+
+            def _add_txxx(desc: str, text: str) -> None:
+                try:
+                    from mutagen.id3 import TXXX
+
+                    frame = TXXX(encoding=3, desc=desc, text=text)
+                    # AIFF/WAVE use tags.add
+                    if hasattr(audio.tags, "add"):
+                        audio.tags.add(frame)  # type: ignore
+                    elif hasattr(audio, "add"):
+                        audio.add(frame)  # type: ignore
+                    else:
+                        audio.tags["TXXX:" + desc] = frame  # type: ignore
+                except Exception:
+                    pass
+
+            for tag_key, value in meta.tags.items():
+                frame_id_enc = id3_map.get(tag_key)
+                if frame_id_enc:
+                    frame_id, enc = frame_id_enc
+                    try:
+                        _add_frame(frame_id, enc, value)
+                    except Exception:
+                        _add_txxx(tag_key, value)
+                else:
+                    _add_txxx(tag_key, value)
 
         else:
             return f"Writing not supported for format: {type(audio).__name__}"
