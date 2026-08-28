@@ -106,6 +106,36 @@ class MetadataPanel(Widget):
                 self.app.notify(f"Save error: {error}", severity="error")
             else:
                 self.app.notify("Metadata saved successfully", severity="success")
+                # keep search index in sync so Artist search finds Album Artist edits like "Bob"
+                try:
+                    from lazysound.core.scanner import AudioFile as _AF
+                    from lazysound.core.metadata import read_metadata as _rm
+
+                    # find MainScreen in stack
+                    main = None
+                    try:
+                        # widget is inside MainScreen, so screen is MainScreen
+                        if self.screen and self.screen.__class__.__name__ == "MainScreen":
+                            main = self.screen
+                        else:
+                            for s in self.app.screen_stack:
+                                if s.__class__.__name__ == "MainScreen":
+                                    main = s
+                                    break
+                    except Exception:
+                        pass
+                    if main is not None and hasattr(main, "search_engine"):
+                        try:
+                            fresh = _rm(_AF(path=self.metadata.path))
+                        except Exception:
+                            fresh = self.metadata
+                        main.search_engine.cache_metadata(fresh.path, fresh)
+                        try:
+                            main.search_engine._haystack_cache.pop(fresh.path, None)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
             self.editing = False
             self._refresh_display()
 

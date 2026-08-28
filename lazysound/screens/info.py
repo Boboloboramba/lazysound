@@ -315,6 +315,28 @@ class MetadataInfoScreen(ModalScreen):
             self.app.notify(f"Save error: {err}", severity="error")
             return
         self.app.notify("Saved", severity="success")
+        # update MainScreen search cache so subsequent Artist search finds the edit (e.g., Album Artist -> Bob)
+        try:
+            from lazysound.core.scanner import AudioFile as _AF
+
+            main = None
+            for s in self.app.screen_stack:
+                if s.__class__.__name__ == "MainScreen":
+                    main = s
+                    break
+            if main is not None and hasattr(main, "search_engine"):
+                # re-read to get normalized tags (ensures on-disk state)
+                try:
+                    fresh = read_metadata(_AF(path=self.meta.path))
+                except Exception:
+                    fresh = self.meta
+                main.search_engine.cache_metadata(fresh.path, fresh)
+                try:
+                    main.search_engine._haystack_cache.pop(fresh.path, None)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         # reload to reflect on-disk state (e.g., normalized keys)
         self._load()
 

@@ -924,6 +924,28 @@ class BatchEditScreen(Screen):
             self.app.notify("Please enter a value", severity="warning")
             return
         result = batch_set_field(self.files, field, value)
+        # keep search index in sync (e.g., Album Artist -> Bob should be found via Artist search)
+        try:
+            from lazysound.core.metadata import read_metadata as _rm
+
+            main = None
+            for s in self.app.screen_stack:
+                if s.__class__.__name__ == "MainScreen":
+                    main = s
+                    break
+            if main is not None and hasattr(main, "search_engine"):
+                for af in self.files:
+                    try:
+                        fresh = _rm(af)
+                        main.search_engine.cache_metadata(af.path, fresh)
+                        try:
+                            main.search_engine._haystack_cache.pop(af.path, None)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         self.app.notify(f"Batch edit: {result.summary}", severity="success" if result.error_count == 0 else "warning")
         self.dismiss(True)
 
