@@ -5,6 +5,7 @@ from __future__ import annotations
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal
+from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Input, Select, Static
@@ -106,8 +107,9 @@ class SearchBar(Widget):
         self.query_text = ""
 
 
-class SearchChanged:
+class SearchChanged(Message):
     """Message posted when the search query changes."""
 
     def __init__(self, query: SearchQuery) -> None:
+        super().__init__()
         self.query = query

@@ -7,6 +7,7 @@ from pathlib import Path
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Vertical
+from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static, Tree
@@ -100,8 +101,9 @@ class FileBrowser(Widget):
         self._populate_tree(tree, path)
 
 
-class DirectoryChanged:
+class DirectoryChanged(Message):
     """Message posted when the selected directory changes."""
 
     def __init__(self, path: Path) -> None:
+        super().__init__()
         self.path = path

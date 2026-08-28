@@ -7,6 +7,7 @@ from pathlib import Path
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Vertical
+from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import DataTable, Static
@@ -103,8 +104,9 @@ class FileList(Widget):
             self.post_message(FileSelected(af))
 
 
-class FileSelected:
+class FileSelected(Message):
     """Message posted when a file is selected in the list."""
 
     def __init__(self, audio_file: AudioFile) -> None:
+        super().__init__()
         self.audio_file = audio_file
