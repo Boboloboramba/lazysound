@@ -18,14 +18,15 @@ from lazysound.core.search import SearchEngine, SearchQuery
 from lazysound.widgets.file_browser import FileBrowser, DirectoryChanged
 from lazysound.widgets.file_list import FileList, FileSelected
 from lazysound.widgets.metadata_panel import MetadataPanel
+from lazysound.widgets.playback import PlaybackPanel
 from lazysound.widgets.search import SearchBar, SearchChanged
 
 
 class MainScreen(Screen):
-    """Main 3-pane screen: directory tree, file list, metadata preview."""
+    """Main screen: 3 panes + bottom playback panel."""
 
     CSS = """
-    MainScreen Horizontal {
+    MainScreen #main-row {
         height: 1fr;
     }
     #left-pane {
@@ -44,6 +45,10 @@ class MainScreen(Screen):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        Binding("space", "play_pause", "Play/Pause"),
+        Binding("s", "stop", "Stop"),
+        Binding("left", "seek_back", " -5s"),
+        Binding("right", "seek_forward", " +5s"),
         Binding("b", "batch_edit", "Batch Edit"),
         Binding("r", "refresh", "Refresh"),
         Binding("g", "goto", "Go To Directory"),
@@ -60,7 +65,7 @@ class MainScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal():
+        with Horizontal(id="main-row"):
             with Vertical(id="left-pane"):
                 yield FileBrowser(start_path=self.current_path, id="file-browser")
             with Vertical(id="center-pane"):
@@ -68,6 +73,7 @@ class MainScreen(Screen):
                 yield FileList(start_path=self.current_path, id="file-list")
             with Vertical(id="right-pane"):
                 yield MetadataPanel(id="metadata-panel")
+        yield PlaybackPanel(id="playback-panel")
         yield Footer()
 
     @on(DirectoryChanged)
@@ -79,6 +85,7 @@ class MainScreen(Screen):
     def on_file_selected(self, event: FileSelected) -> None:
         self.selected_file = event.audio_file
         self.query_one("#metadata-panel", MetadataPanel).current_file = event.audio_file
+        self.query_one("#playback-panel", PlaybackPanel).current_file = event.audio_file
 
     @on(SearchChanged)
     def on_search_changed(self, event: SearchChanged) -> None:
@@ -111,6 +118,18 @@ class MainScreen(Screen):
         file_list = self.query_one("#file-list", FileList)
         if file_list.files:
             self.app.push_screen(BatchEditScreen(file_list.files))
+
+    def action_play_pause(self) -> None:
+        self.query_one("#playback-panel", PlaybackPanel).action_play_pause()
+
+    def action_stop(self) -> None:
+        self.query_one("#playback-panel", PlaybackPanel).action_stop()
+
+    def action_seek_back(self) -> None:
+        self.query_one("#playback-panel", PlaybackPanel).action_seek_back()
+
+    def action_seek_forward(self) -> None:
+        self.query_one("#playback-panel", PlaybackPanel).action_seek_forward()
 
 
 class GotoScreen(Screen):
