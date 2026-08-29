@@ -31,6 +31,24 @@ EXCLUDE_PREFIXES = (
 # We allow hidden = False; we skip any component starting with "." unless it's a known music hidden? No.
 
 
+def _is_html_placeholder(path: Path) -> bool:
+    try:
+        sz = path.stat().st_size
+        if sz == 0 or sz > 200_000:
+            return False
+        head = path.read_bytes()[:2048].lstrip()
+        low = head[:800].lower()
+        if low.startswith(b"<!doctype") or low.startswith(b"<html"):
+            return True
+        if b"<title>404" in low and b"<html" in low:
+            return True
+        if sz < 2048 and b"not found" in low and b"<html" in low:
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def _should_skip_dir(path: Path) -> bool:
     name = path.name
     if name.startswith("."):
@@ -226,8 +244,11 @@ class AudioLibrary:
                             continue
                         ext = Path(fn).suffix.lower()
                         if ext in AUDIO_EXTENSIONS:
-                            is_daw = ext in {".rpp", ".ptx", ".pts", ".logicx", ".ardour", ".dawproject"}
                             full = cur / fn
+                            # Skip HTML 404 pages masquerading as audio
+                            if _is_html_placeholder(full):
+                                continue
+                            is_daw = ext in {".rpp", ".ptx", ".pts", ".logicx", ".ardour", ".dawproject"}
                             try:
                                 sz = full.stat().st_size
                             except Exception:

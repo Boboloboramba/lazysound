@@ -85,6 +85,27 @@ class ScanResult:
     errors: list[str] = field(default_factory=list)
 
 
+def _is_html_placeholder(path: Path) -> bool:
+    """Detect HTML 404 pages masquerading as audio (e.g., meow.mp3 315 bytes)."""
+    try:
+        sz = path.stat().st_size
+        if sz == 0 or sz > 200_000:
+            return False
+        # only check small files that could be HTML error pages
+        head = path.read_bytes()[:2048].lstrip()
+        low = head[:800].lower()
+        if low.startswith(b"<!doctype") or low.startswith(b"<html"):
+            return True
+        if b"<title>404" in low and b"<html" in low:
+            return True
+        # also check for typical 404 text in small files
+        if sz < 2048 and b"not found" in low and b"<html" in low:
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def scan_directory(root: Path, recursive: bool = True, max_depth: int = 10) -> ScanResult:
     """Scan a directory for audio files.
 
@@ -127,6 +148,10 @@ def scan_directory(root: Path, recursive: bool = True, max_depth: int = 10) -> S
             elif entry.is_file():
                 ext = entry.suffix.lower()
                 if ext in AUDIO_EXTENSIONS:
+                    # Filter out HTML placeholders (e.g., 404 pages saved as .mp3)
+                    if _is_html_placeholder(entry):
+                        result.errors.append(f"Skipped HTML placeholder: {entry} (not audio)")
+                        continue
                     af = AudioFile(path=entry)
                     if af.is_daw_project:
                         result.daw_projects.append(af)

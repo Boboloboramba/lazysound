@@ -33,6 +33,20 @@ class MetadataPanel(Widget):
     MetadataPanel ScrollableContainer {
         height: 1fr;
     }
+    #button-bar {
+        dock: bottom;
+        height: 3;
+        width: 1fr;
+        padding: 0 1;
+        background: $panel;
+        align: center middle;
+    }
+    #button-bar Button {
+        margin: 0 1;
+        min-width: 5;
+        width: 1fr;
+        max-width: 12;
+    }
     .meta-row {
         height: auto;
         padding: 0 1;
@@ -77,19 +91,18 @@ class MetadataPanel(Widget):
     editing: reactive[bool] = reactive(False)
 
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Static("Metadata", id="panel-header")
-            with ScrollableContainer(id="meta-scroll"):
-                yield Static("No file selected", id="file-header")
-                yield Static("", id="waveform-display")
-                with Vertical(id="tags-container"):
-                    pass
-                with Vertical(id="tech-container"):
-                    pass
-            with Horizontal(id="button-bar"):
-                yield Button("Edit", id="btn-edit", variant="primary")
-                yield Button("Save", id="btn-save", variant="success")
-                yield Button("Cancel", id="btn-cancel", variant="warning")
+        yield Static("Metadata", id="panel-header")
+        with ScrollableContainer(id="meta-scroll"):
+            yield Static("No file selected", id="file-header")
+            yield Static("", id="waveform-display")
+            with Vertical(id="tags-container"):
+                pass
+            with Vertical(id="tech-container"):
+                pass
+        with Horizontal(id="button-bar"):
+            yield Button("Edit", id="btn-edit", variant="primary")
+            yield Button("Save", id="btn-save", variant="success")
+            yield Button("Cancel", id="btn-cancel", variant="warning")
 
     @on(Button.Pressed, "#btn-edit")
     def on_edit_pressed(self) -> None:

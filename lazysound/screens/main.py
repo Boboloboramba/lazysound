@@ -30,15 +30,15 @@ class MainScreen(Screen):
     }
     #left-pane {
         width: 28;
-        min-width: 18;
+        min-width: 16;
     }
     #center-pane {
         width: 1fr;
-        min-width: 30;
+        min-width: 20;
     }
     #right-pane {
         width: 1fr;
-        min-width: 38;
+        min-width: 24;
     }
     """
 
