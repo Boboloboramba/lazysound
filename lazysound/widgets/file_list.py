@@ -78,6 +78,14 @@ class FileList(Widget):
                 af.format_name,
                 af.size_display,
             )
+        # Auto-select first file so Metadata side panel is populated immediately
+        if self.files:
+            try:
+                table.move_cursor(row=0)
+                # RowHighlighted will fire and post FileSelected, but also post directly for robustness
+                self.post_message(FileSelected(self.files[0]))
+            except Exception:
+                pass
 
     def set_files(self, files: list[AudioFile]) -> None:
         """Display an arbitrary list of files (used for deep search / recursive view)."""
@@ -100,6 +108,15 @@ class FileList(Widget):
             if len(display) > 32:
                 display = display[:31] + "…"
             table.add_row(display, af.format_name, af.size_display)
+        # Auto-select first file so side panel populates (fixes empty Metadata Tags)
+        if self.files:
+            try:
+                table.move_cursor(row=0)
+                # Ensure highlight posts FileSelected even if cursor was already at 0
+                # DataTable may not fire RowHighlighted when moving to same row, so post directly
+                self.post_message(FileSelected(self.files[0]))
+            except Exception:
+                pass
 
     def get_selected_file(self) -> AudioFile | None:
         """Get the currently selected AudioFile."""
